@@ -4,7 +4,7 @@
 PRA code -- additional files for testing
 Modified on Tuesday June 30, 2021
 
-@author: javipena
+@author: Javier Pena
 """
 import numpy as np
 import time
