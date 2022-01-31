@@ -22,4 +22,6 @@ The file PRAtests.py contains some auxiliary functions to test the projection an
 
 def experiments(lset,dset,deltaset,limdim,N): Python function to construct a direct product of second cone, generate N random instances, and test the above PRA algorithm.  The N instances are generated for each choice of the parameters ell and (d_1,\dots,d_ell) defining the cone, as well as a conditioning parameter delta, defined via the sets  lset, dset, deltaset.  This algorithm returns the dataframes dsum, dfResult that summarize the numerical results and generates tables and summary plots.
 
-The additional file PRAtoyexample.py  performs experiments via the previous functions and summary tables and plots for a small set of low-dimensional test problems. 
+def comparison(rset,n,deltaset,N): Python function to construct a direct product of second cones, and then compare the PRA algorithm with alternative solvers on N random instances.  The N instances are generated for each choice of the parameters ell, (d_1,\dots,d_\ell), and delta defined via the sets lset, dset, deltaset.  This algorithm returns the dataframes compsuccess, compCPU and also largestnorm, smallestminev}  These dataframes summarize the numerical results and generate tables.
+
+The additional files PRAdemo.py and PRAdemo.ipynb  perform experiments via the previous functions and summary tables and plots for a small set of low-dimensional test problems. 
