@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 PRA second-order code -- algorithms only
-Modified on Tuesday June 15, 2021
+Modified on Thursday June 2, 2022
 
 @authors: Javier Peña and Negar Soheili
 """
@@ -310,6 +310,223 @@ def PRAcpversion(A,AA,K,solver = None):
         xLperp = None ; feas = -1
     return xL,xLperp,feas
 
+
+def PRAsocp(A,AA,K,solver = None):
+    """
+    This functions does the same as PRAcpversion but calling the SOCP solver directly
+    """
+    if (solver == 'GUROBI'): 
+        xL,xLperp,feas,socptime = PRAgurobi(A,AA,K)
+    elif (solver == 'MOSEK'):
+        xL,xLperp,feas,socptime = PRAmosek(A,AA,K)
+    elif (solver == 'ECOS'):
+        xL,xLperp,feas,socptime = PRAecos(A,AA,K)
+    return xL,xLperp,feas,socptime
+
+def PRAgurobi(A,AA,K):
+    """
+    This functions does the same as PRAcpversion but specialized to Gurobi
+    """
+    import gurobipy as gp
+    import time
+    from scipy.sparse import lil_matrix
+    
+    # First, for L \cap K
+    prob = gp.Model()    
+    n = sum(K.dim)
+    x = prob.addMVar(int(n),lb=-gp.GRB.INFINITY)
+    prob.setObjective(0)
+    prob.addConstr(A@x == 0)    
+    for i in range(K.r):
+        ni = K.dim[i]-1
+        ti = prob.addMVar(1,lb=0) 
+        ei = np.zeros(n) ; ei[K.sdim[i]]=1     
+        Mi = lil_matrix((n,n))    
+        Mi[K.sdim[i]+1:K.sdim[i]+K.dim[i],K.sdim[i]+1:K.sdim[i]+K.dim[i]] = np.identity(ni)
+        prob.addConstr(ei@x - 1 == ti)
+        prob.addConstr(x@Mi@x <= ti@ti)
+    prob.setParam('OutputFlag',0)
+    stime = time.time()
+    prob.optimize()
+    gurobitime = time.time()-stime
+    try:
+        xL = x.X/np.linalg.norm(x.X)
+        feas = 1 ; xLperp = None
+        return xL, xLperp, feas, gurobitime
+    except:
+        xL = None ; feas = -1
+
+    # Second, for L^\perp \cap K
+    prob = gp.Model()    
+    n = sum(K.dim)
+    x = prob.addMVar(int(n),lb=-gp.GRB.INFINITY)
+    prob.setObjective(0)
+    prob.addConstr(AA@x == 0)
+    Mlhs = lil_matrix((n,n)) ; Mrhs = lil_matrix((n,n)) ; 
+    for i in range(K.r):
+        ni = K.dim[i]-1
+        ti = prob.addMVar(1,lb=0) 
+        ei = np.zeros(n) ; ei[K.sdim[i]]=1     
+        Mi = lil_matrix((n,n))    
+        Mi[K.sdim[i]+1:K.sdim[i]+K.dim[i],K.sdim[i]+1:K.sdim[i]+K.dim[i]] = np.identity(ni)
+        prob.addConstr(ei@x - 1 == ti)
+        prob.addConstr(x@Mi@x <= ti@ti)
+    prob.setParam('OutputFlag',0)
+    stime = time.time()
+    prob.optimize()
+    gurobitime = time.time()-stime + gurobitime
+    try:
+        xLperp = x.X/np.linalg.norm(x.X)
+        feas = 2 ; xL = None
+        return xL, xLperp, feas, gurobitime
+    except:
+        xLperp = None ; feas = -1
+    return xL, xLperp, feas, gurobitime
+
+def PRAmosek(A,AA,K):
+    """
+    This functions does the same as PRAcpversion but specialized to Mosek
+    """
+    import mosek
+    import time    
+    from scipy.sparse import lil_matrix
+    
+    n = sum(K.dim)
+    
+    # First, for L \cap K
+    A = scipy.sparse.csr_matrix(A)
+    m = A.shape[0]
+    
+    with mosek.Env() as env:
+        with env.Task() as task:
+            task.appendcons(m+K.r)
+            task.appendvars(n+K.r)
+                                   
+            for j in range(n):
+                task.putcj(j, 0)
+                task.putvarbound(j, mosek.boundkey.fr, -np.inf, np.inf)
+              
+            for i in range(m):
+                task.putconbound(i, mosek.boundkey.fx, 0, 0)
+                task.putarow(i,A[i].indices,A[i].data.tolist())
+            
+            for i in range(K.r):
+                task.putcj(n+i, 0)  
+                task.putvarbound(n+i, mosek.boundkey.lo, 0.0, +np.inf)
+                task.putarow(m+i,[K.sdim[i], n+i],[1, -1])
+                task.putconbound(m+i, mosek.boundkey.fx, 1, 1)
+                task.appendcone(mosek.conetype.quad,
+                                0.0,
+                                [n+i]+list(range(K.sdim[i]+1,K.sdim[i]+K.dim[i])))
+
+            task.putobjsense(mosek.objsense.minimize)
+
+            # Solve the problem
+            stime = time.time()
+            task.optimize()
+            mosektime = time.time()-stime
+            solsta = task.getsolsta(mosek.soltype.itr)
+            
+            # Output a solution
+            xx = [0.] * (n+K.r)
+            task.getxx(mosek.soltype.itr,xx)
+        
+            if solsta == mosek.solsta.optimal:
+                xL = xx[0:n]/np.linalg.norm(xx[0:n])
+                feas = 1 ; xLperp = None
+                return xL, xLperp, feas, mosektime
+          
+      
+    # Second, for Lperp \cap K
+    AA = scipy.sparse.csr_matrix(AA)
+    m = AA.shape[0]
+    
+    with mosek.Env() as env:
+        with env.Task() as task:
+            task.appendcons(m+K.r)
+            task.appendvars(n+K.r)
+                                   
+            for j in range(n):
+                task.putcj(j, 0)
+                task.putvarbound(j, mosek.boundkey.fr, -np.inf, np.inf)
+            
+            for i in range(m):
+                task.putconbound(i, mosek.boundkey.fx, 0, 0)
+                task.putarow(i,AA[i].indices,AA[i].data.tolist())
+            
+            for i in range(K.r):
+                task.putcj(n+i, 0)  
+                task.putvarbound(n+i, mosek.boundkey.lo, 0.0, +np.inf)
+                task.putarow(m+i,[K.sdim[i], n+i],[1, -1])
+                task.putconbound(m+i, mosek.boundkey.fx, 1, 1)
+                task.appendcone(mosek.conetype.quad,
+                                0.0,
+                                [n+i]+list(range(K.sdim[i]+1,K.sdim[i]+K.dim[i])))
+
+            task.putobjsense(mosek.objsense.minimize)
+
+            # Solve the problem
+            stime = time.time()
+            task.optimize()
+            mosektime = time.time()-stime+mosektime
+            solsta = task.getsolsta(mosek.soltype.itr)
+            
+            # Output a solution
+            xx = [0.] * (n+K.r)
+            task.getxx(mosek.soltype.itr,xx)
+        
+        
+            if solsta == mosek.solsta.optimal:
+                xLperp = xx[0:n]/np.linalg.norm(xx[0:n])
+                feas = 2 ; xL = None
+                return xL, xLperp, feas, mosektime
+            else:
+                xL = None  ; xLperp = None  ; feas = -1
+        
+    return xL, xLperp, feas, mosektime
+
+def PRAecos(A,AA,K):
+    """
+    This functions does the same as PRAcpversion but specialized to ECOS
+    """
+    import ecos
+    import time    
+    from scipy.sparse import lil_matrix
+    
+    # First, for L \cap K
+    n = sum(K.dim)
+    A = scipy.sparse.csr_matrix(A)
+    m = A.shape[0]
+    c = np.zeros(n)
+    b = np.zeros(m)
+    G = -scipy.sparse.identity(n)
+    h = np.zeros(n)
+    h[K.sdim] = -1 
+    qcone = K.dim.tolist()
+    dims = {'l':0, 'q':qcone,'e':0}
+    stime = time.time()    
+    sol = ecos.solve(c,G,h,dims,A,b,verbose=False)
+    ecostime = time.time()-stime    
+    if sol['info']['exitFlag'] == 0:
+        xL = sol['x']
+        xL = xL/np.linalg.norm(xL)
+        feas = 1
+        xLperp = None  
+        return xL, xLperp, feas, ecostime
+
+    # Second, for Lperp \cap K        
+    AA = scipy.sparse.csr_matrix(AA)
+    stime = time.time()
+    sol = ecos.solve(c,G,h,dims,AA,b,verbose=False)
+    ecostime = time.time()-stime
+    if sol['info']['exitFlag'] == 0:
+        xLperp = sol['x']
+        xLperp = xLperp/np.linalg.norm(xLperp)
+        feas = 2
+        xL = None  
+        return xL, xLperp, feas
+    xL = None  ; xLperp = None  ; feas = -1
+    return xL, xLperp, feas, ecostime
 
 def PRAvariant(A, AA, K, z0, aggressive = True, RescalingLimit = 50):
     """ Projection and Rescaling Algorithm

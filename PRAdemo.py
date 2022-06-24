@@ -7,7 +7,7 @@ Created on Fri Jun 18 09:10:45 2021
 """
 
 import numpy as np
-from PRAalgos import Cone,PRA,PRAcpversion,NaiveInstance,ControlledInstance
+from PRAalgos import Cone,PRA,PRAsocp,NaiveInstance,ControlledInstance
 from PRAtests import experiments,comparePRA,comparison
 
 """
@@ -35,7 +35,7 @@ else:
     print('PRA failed')
     
 # Compare with cvxpy version
-xL,xLperp,feas = PRAcpversion(A,AA,K,solver = 'MOSEK')
+xL,xLperp,feas,socptime = PRAsocp(A,AA,K,solver = 'MOSEK')
 if (feas == 1): 
     print('found solution in L \cap K') 
     print('norm(xL) = ',str(np.linalg.norm(xL)))
@@ -70,16 +70,17 @@ lset = (3, 5, 9, 10, 12)
 dset = lset
 deltaset = (1.000, 0.500, 0.20, 0.1)
 limdim = 200
-dsum,dfResult = experiments(lset,dset,deltaset,N,limdim)
+#dsum,dfResult = experiments(lset,dset,deltaset,N,limdim)
 
 """ 
-Run some more experiments to compare PRA with GUROBI, ECOS, SCS on controlled instances
+Run some more experiments to compare PRA with GUROBI, ECOS on controlled instances
 """
-deltaset = (1,0.1,0.01,0.001) ; N = 5
-rset = (5,10,20) ; n = 100
+deltaset = (1,0.1,0.01,0.001) ; N = 100
+#rset = (5,10,20) ; n = 100
+rset = (10,20,50,100) ; n = 1000
 
 # Original values
 #deltaset = (1,0.1,0.01,0.001) ; N = 100
 #rset = (10,20,50,100) ; n = 1000
 
-compsuccess,compCPU,largestnorm,smallestminev = comparison(rset,n,deltaset,N)
+compsuccess,compCPU,compCPUnet,largestnorm,smallestminev = comparison(rset,n,deltaset,N)

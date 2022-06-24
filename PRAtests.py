@@ -12,12 +12,12 @@ import pandas as pd
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FixedLocator, FixedFormatter
-from PRAalgos import Cone,PRA,PRAcpversion,NaiveInstance,ControlledInstance        
+from PRAalgos import Cone,PRA,PRAsocp,NaiveInstance,ControlledInstance        
 
 def comparison(rset,n,deltaset,N):
     
     """
-    Script to perform some comparisons between PRA and the other solvers: GUROBI, MOSEK, ECOS, SCS.
+    Script to perform some comparisons between PRA and other SOCP solvers: GUROBI, MOSEK, ECOS, SCS.
 
     Parameters
     ----------
@@ -34,12 +34,14 @@ def comparison(rset,n,deltaset,N):
     smallestminev: smallest of the minimum eigenvalue of x over successfully solved instances
     """
 
-    solvers = ['PRA','GUROBI','MOSEK','ECOS','SCS'] 
-    CPUresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS','SCS',"delta", "r"])
-    normresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS','SCS',"delta", "r"])
-    minevresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS','SCS',"delta", "r"])
+    solvers = ['PRA','GUROBI','MOSEK','ECOS']
+    CPUresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS',"delta", "r"])
+    CPUresultsnet = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS',"delta", "r"])
+    normresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS',"delta", "r"])
+    minevresults = pd.DataFrame(columns=["PRA",'GUROBI','MOSEK','ECOS',"delta", "r"])
     compsuccess = pd.DataFrame(index = solvers) 
     compCPU = pd.DataFrame(index = solvers) 
+    compCPUnet = pd.DataFrame(index = solvers) 
     largestnorm = pd.DataFrame(index = solvers) 
     smallestminev = pd.DataFrame(index = solvers) 
     for delta in deltaset:
@@ -47,48 +49,59 @@ def comparison(rset,n,deltaset,N):
             d = n/r ; dim = np.ones(r)*d ; dim = dim.astype(int);
             K = Cone(dim) ; n = sum(K.dim) ; 
             m = n/2 ; m = m.astype(int) ;
-            cputimes, normresiduals, mineigenvals = comparePRA(m,K,N,delta,True,50) 
+            cputimes, cputimesnet, normresiduals, mineigenvals = comparePRA(m,K,N,delta,True,50) 
             cpudf = pd.DataFrame(cputimes.T,columns = solvers) ; cpudf[['delta','r']] = [delta,r]
+            cpudfnet = pd.DataFrame(cputimesnet.T,columns = solvers) ; cpudfnet[['delta','r']] = [delta,r]
             normsdf = pd.DataFrame(normresiduals.T,columns = solvers) ; normsdf[['delta','r']] = [delta,r]
             minevdf = pd.DataFrame(mineigenvals.T,columns = solvers) ; minevdf[['delta','r']] = [delta,r]
 
             CPUresults = CPUresults.append(cpudf, ignore_index=True) 
+            CPUresultsnet = CPUresultsnet.append(cpudfnet, ignore_index=True) 
             normresults = normresults.append(normsdf, ignore_index=True) 
             minevresults = minevresults.append(minevdf, ignore_index=True) 
-            compresults = pd.concat([CPUresults,normresults,minevresults], axis = 0, keys = ['CPU','norm','minev'],names = ['metric'])
+            compresults = pd.concat([CPUresults,CPUresultsnet,normresults,minevresults], axis = 0, keys = ['CPU','CPUnet','norm','minev'],names = ['metric'])
             compresults.to_csv('compresults.csv')
             
     # Index by delta and r for convenience
     CPUresults = CPUresults.set_index(['delta','r']) 
+    CPUresultsnet = CPUresultsnet.set_index(['delta','r']) 
     normresults = normresults.set_index(['delta','r']) 
     minevresults = minevresults.set_index(['delta','r']) 
-    compresults = pd.concat([CPUresults,normresults,minevresults], axis = 0, keys = ['cputime','norm','minev'],names = ['metric'])
+    compresults = pd.concat([CPUresults,CPUresultsnet,normresults,minevresults], axis = 0, keys = ['cputime','cputimenet','norm','minev'],names = ['metric'])
     compresults.to_csv('compresults.csv')
 
     # Compute summaries
     compsuccess = CPUresults.groupby(level=['delta','r']).count().astype(float)/N 
     compCPU = CPUresults.groupby(level=['delta','r']).mean() 
+    compCPUnet = CPUresultsnet.groupby(level=['delta','r']).mean() 
     largestnorm = normresults.groupby(level=['delta','r']).max() 
     smallestminev = minevresults.groupby(level=['delta','r']).min() 
-    compsummary = pd.concat([compsuccess,compCPU,largestnorm,smallestminev], axis = 0, keys = ['successavg','cputimeavg','largestnorm','smallestminev'],names = ['metric'])
+    compsummary = pd.concat([compsuccess,compCPU,compCPUnet,largestnorm,smallestminev], axis = 0, keys = ['successavg','cputimeavg','cputimenetavg','largestnorm','smallestminev'],names = ['metric'])
     compsummary.to_csv('compsummary.csv')
 
     print('\n\n Proportion of instances solved successfully\n') 
     print(compsuccess)
+    # Report the net CPU times only
     print('\n\n Average CPU times of instances solved successfully\n') 
-    print(compCPU)
+    print(compCPUnet)
+    # If we also want the gross CPU times run also
+    #    print('\n\n Average CPU times of instances solved successfully\n') 
+    #    print(compCPU)
+
 
     print('\n\n Largest norm (instances solved successfully)\n') 
     print(largestnorm)
     print('\n\n Smallest minimum eigenvalue (instances solved successfully)\n') 
     print(smallestminev)
 
-    return compsuccess,compCPU,largestnorm,smallestminev
+    # To be consistent with the paper, return the net CPU times only
+    return compsuccess, compCPUnet, largestnorm,smallestminev
+    # If we also want the gross CPU times run instead
+    #    return compsuccess,compCPU, compCPUnet, largestnorm,smallestminev
     
 def comparePRA(m,K,N,delta=0.01,aggressive=True,RescalingLimit=50):
-    """Script to compare the projection and rescaling algorithm with a cvxpy version.
-    input parameters are identical to those of TestPRA
-    output returns focus on cpu times only
+    """Script to compare the projection and rescaling algorithm with other SOCP solvers.
+    Input parameters are identical to those of TestPRA.
 
     Parameters
     ----------
@@ -101,17 +114,19 @@ def comparePRA(m,K,N,delta=0.01,aggressive=True,RescalingLimit=50):
 
     Returns(all N-dimensional arrays)
     -------
-     cputimes       : CPU times for all solvers (PRA, GUROBI, MOSEK, ECOS, SCS)
+     cputimes       : total CPU times (python + SOCP solver)
+     cputimesnet    : CPU times (SOCP solver only)
      residualnorm   : either norm(A@xL) or norm(AA@xLperp)
      mineigvalue    : either min(eigenvalue(xL)) or min(eigenvalue(xLperp))
     """
     # Initialization
     cpuPRA = np.zeros(N) 
-    cpucp = np.zeros((4,N)) 
-    normresiduals = np.zeros((5,N)) 
-    mineigenvals = np.zeros((5,N)) 
+    cpucp = np.zeros((3,N)) 
+    cpucpnet = np.zeros((3,N)) 
+    normresiduals = np.zeros((4,N)) 
+    mineigenvals = np.zeros((4,N)) 
 
-    solvers = ('GUROBI','MOSEK','ECOS','SCS')
+    solvers = ('GUROBI','MOSEK','ECOS')
 
     # Initialization of the algorithm inputs
     n = sum(K.dim)
@@ -161,15 +176,16 @@ def comparePRA(m,K,N,delta=0.01,aggressive=True,RescalingLimit=50):
                 normresiduals[0,i] = np.linalg.norm(AA@xLperp)
                 xLeval, xLevec = K.eigenvalues(xLperp) 
                 mineigenvals[0,i] = min(xLeval)
-        for j in range(4):
+        for j in range(3):
             if (feas == 2): # swap the roles of A and AA to favor/speed up the cp version
                 AAA = AA ; AA = A ; A = AAA
             stime = time.time()        
-            xL,xLperp,feas = PRAcpversion(A,AA,K,solvers[j])
+            xL,xLperp,feas,socptime = PRAsocp(A,AA,K,solvers[j])
             if (feas<0):
                 cpucp[j,i] = np.nan ; normresiduals[j+1,i] = np.nan ; mineigenvals[j+1,i] = np.nan ;
+                cpucpnet[j,i] = np.nan
             else:
-                cpucp[j,i] = time.time() - stime  
+                cpucp[j,i] = time.time() - stime  ; cpucpnet[j,i] = socptime
                 if (feas == 1):
                     normresiduals[j+1,i] = np.linalg.norm(A@xL)
                     xLeval, xLevec = K.eigenvalues(xL) 
@@ -178,8 +194,11 @@ def comparePRA(m,K,N,delta=0.01,aggressive=True,RescalingLimit=50):
                     normresiduals[j+1,i] = np.linalg.norm(AA@xLperp)
                     xLeval, xLevec = K.eigenvalues(xLperp) 
                     mineigenvals[j+1,i] = min(xLeval)
-        cputimes = np.vstack((cpuPRA,cpucp))  
-    return cputimes, normresiduals, mineigenvals  
+                if min(xLeval) < 0:
+                    cpucp[j,i] = np.nan ; normresiduals[j+1,i] = np.nan ; mineigenvals[j+1,i] = np.nan ; 
+                    cpucpnet[j,i] = np.nan
+        cputimes = np.vstack((cpuPRA,cpucp)) ; cputimesnet = np.vstack((cpuPRA,cpucpnet)) ;
+    return cputimes, cputimesnet, normresiduals, mineigenvals  
 
     
 def TestPRA(m,K,N,delta=0.01,aggressive=True,RescalingLimit=50):
